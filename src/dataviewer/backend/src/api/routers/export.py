@@ -7,6 +7,7 @@ frame editing, removal, and sub-task annotations applied.
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ from ..services.hdf5_exporter import (
     HDF5ExportError,
     parse_edit_operations,
 )
+from ..validation import validated_dataset_id
 
 router = APIRouter()
 
@@ -102,8 +104,8 @@ class ExportResultResponse(BaseModel):
 
 @router.post("/{dataset_id}/export", response_model=ExportResultResponse)
 async def export_episodes(
-    dataset_id: str,
-    request: ExportRequest,
+    dataset_id: str = Depends(validated_dataset_id),
+    request: ExportRequest = ...,
     service: DatasetService = Depends(get_dataset_service),
 ) -> ExportResultResponse:
     """
@@ -124,15 +126,37 @@ async def export_episodes(
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
 
     # Get dataset path
-    dataset_path = service._get_dataset_path(dataset_id)
-    if not dataset_path:
+    dataset_id = os.path.basename(dataset_id)
+    try:
+        dataset_path = service._get_dataset_path(dataset_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Dataset '{dataset_id}' does not have a valid path for export",
+        )
+    safe_dataset_base = os.path.realpath(service.base_path)
+    resolved_dataset = os.path.realpath(str(dataset_path))
+    if not resolved_dataset.startswith(safe_dataset_base + os.sep):
+        raise HTTPException(
+            status_code=400,
+            detail="Path traversal detected: dataset path escapes base directory",
+        )
+    dataset_path = Path(resolved_dataset)
+    if not dataset_path.exists():
         raise HTTPException(
             status_code=400,
             detail=f"Dataset '{dataset_id}' does not have a local path for export",
         )
 
     # Validate output path
-    output_path = Path(request.outputPath)
+    safe_base = os.path.realpath(service.base_path)
+    output_path_str = os.path.realpath(request.outputPath)
+    if not output_path_str.startswith(safe_base + os.sep):
+        raise HTTPException(
+            status_code=400,
+            detail="Path traversal detected: resolved path escapes base directory",
+        )
+    output_path = Path(output_path_str)
     try:
         output_path.mkdir(parents=True, exist_ok=True)
     except Exception as e:
@@ -193,8 +217,8 @@ async def export_episodes(
 
 @router.post("/{dataset_id}/export/stream")
 async def export_episodes_stream(
-    dataset_id: str,
-    request: ExportRequest,
+    dataset_id: str = Depends(validated_dataset_id),
+    request: ExportRequest = ...,
     service: DatasetService = Depends(get_dataset_service),
 ) -> StreamingResponse:
     """
@@ -219,15 +243,37 @@ async def export_episodes_stream(
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
 
     # Get dataset path
-    dataset_path = service._get_dataset_path(dataset_id)
-    if not dataset_path:
+    dataset_id = os.path.basename(dataset_id)
+    try:
+        dataset_path = service._get_dataset_path(dataset_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Dataset '{dataset_id}' does not have a valid path for export",
+        )
+    safe_stream_base = os.path.realpath(service.base_path)
+    resolved_stream = os.path.realpath(str(dataset_path))
+    if not resolved_stream.startswith(safe_stream_base + os.sep):
+        raise HTTPException(
+            status_code=400,
+            detail="Path traversal detected: dataset path escapes base directory",
+        )
+    dataset_path = Path(resolved_stream)
+    if not dataset_path.exists():
         raise HTTPException(
             status_code=400,
             detail=f"Dataset '{dataset_id}' does not have a local path for export",
         )
 
     # Validate output path
-    output_path = Path(request.outputPath)
+    safe_base = os.path.realpath(service.base_path)
+    output_path_str = os.path.realpath(request.outputPath)
+    if not output_path_str.startswith(safe_base + os.sep):
+        raise HTTPException(
+            status_code=400,
+            detail="Path traversal detected: resolved path escapes base directory",
+        )
+    output_path = Path(output_path_str)
     try:
         output_path.mkdir(parents=True, exist_ok=True)
     except Exception as e:
@@ -354,7 +400,7 @@ async def export_episodes_stream(
 
 @router.get("/{dataset_id}/export/preview")
 async def preview_export(
-    dataset_id: str,
+    dataset_id: str = Depends(validated_dataset_id),
     episode_indices: str = Query(..., description="Comma-separated episode indices"),
     removed_frames: str | None = Query(None, description="Comma-separated frame indices to remove"),
     service: DatasetService = Depends(get_dataset_service),
