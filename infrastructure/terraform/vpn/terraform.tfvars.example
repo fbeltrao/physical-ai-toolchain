@@ -12,6 +12,12 @@ resource_prefix = "yourprefix"
 instance        = "001"
 
 // [Optional]
+// AZ-supported VPN Gateway SKUs are the recommended default family.
+vpn_gateway_config = {
+	sku = "VpnGw1AZ"
+}
+
+// [Optional]
 // Point-to-Site (P2S) Certificate Authentication
 root_certificate_name = "RoboticsVPNRootCert"
 
