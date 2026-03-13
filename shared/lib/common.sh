@@ -47,7 +47,7 @@ activate_local_osmo() {
 
   info "Using local OSMO CLI: $OSMO_DEV_CLI"
 
-  # shellcheck disable=SC2329  # exported via export -f for child shells
+  # shellcheck disable=SC2317
   osmo() { "$OSMO_DEV_CLI" "$@"; }
   export OSMO_DEV_CLI
   export -f osmo
@@ -231,30 +231,66 @@ validate_version_pair() {
 # OSMO Authentication
 # // ===================================================================
 
+osmo_api_is_unsupported() {
+  local output="${1:-}"
+  [[ "$output" == *"status code 404"* ]] || [[ "$output" == *'"detail":"Not Found"'* ]] || [[ "$output" == *"Error code: 404"* ]]
+}
+
+read_osmo_login_token() {
+  local login_config="${HOME}/.config/osmo/login.yaml"
+  [[ -f "$login_config" ]] || return 1
+  sed -n 's/^osmo_token: //p' "$login_config" | head -n1
+}
+
 osmo_login_and_setup() {
   local service_url="${1:?service URL required}"
   local username="${2:-guest}"
   local roles="${3:-osmo-backend}"
+  local user_output=""
+
   info "Logging into OSMO at ${service_url}..."
   osmo login "${service_url}/" --method dev --username "$username"
   info "Ensuring dev user '$username' exists with $roles role..."
-  if ! osmo user get "$username" &>/dev/null; then
-    osmo user create "$username" --roles "$roles"
-  else
+
+  if user_output=$(osmo user get "$username" 2>&1); then
     osmo user update "$username" --add-roles "$roles"
+    return 0
   fi
+
+  if osmo_api_is_unsupported "$user_output"; then
+    warn "OSMO service does not support the user management API; skipping dev user bootstrap"
+    return 0
+  fi
+
+  if user_output=$(osmo user create "$username" --roles "$roles" 2>&1); then
+    return 0
+  fi
+
+  if osmo_api_is_unsupported "$user_output"; then
+    warn "OSMO service does not support the user management API; skipping dev user bootstrap"
+    return 0
+  fi
+
+  error "$user_output"
+  return 1
 }
 
 # Apply SecretProviderClass for Azure Key Vault secrets sync
-# Usage: apply_secret_provider_class <namespace> <keyvault> <client_id> <tenant_id>
+# Usage: apply_secret_provider_class <namespace> <keyvault> <client_id> <tenant_id> [include_redis_secret]
 apply_secret_provider_class() {
   local namespace="${1:?namespace required}"
   local keyvault="${2:?keyvault name required}"
   local client_id="${3:?client_id required}"
   local tenant_id="${4:?tenant_id required}"
+  local include_redis_secret="${5:-true}"
 
   local manifest_dir
   manifest_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/infrastructure/setup/manifests"
+  local manifest_name="aks-secret-provider-class.yaml"
+
+  if [[ "$include_redis_secret" == "false" ]]; then
+    manifest_name="aks-secret-provider-class-postgres-only.yaml"
+  fi
 
   export NAMESPACE="$namespace"
   export KEY_VAULT_NAME="$keyvault"
@@ -262,5 +298,5 @@ apply_secret_provider_class() {
   export TENANT_ID="$tenant_id"
 
   info "Applying SecretProviderClass to namespace $namespace..."
-  envsubst < "$manifest_dir/aks-secret-provider-class.yaml" | kubectl apply -f -
+  envsubst < "$manifest_dir/$manifest_name" | kubectl apply -f -
 }
