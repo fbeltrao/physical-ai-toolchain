@@ -61,6 +61,7 @@ use_access_keys=false
 osmo_identity_client_id=""
 regenerate_token=false
 custom_expiry=""
+use_dev_backend_login=false
 config_preview=false
 skip_preflight=false
 use_local_osmo=false
@@ -99,6 +100,11 @@ done
 [[ "$use_local_osmo" == "true" ]] && activate_local_osmo
 
 require_tools terraform osmo kubectl helm jq az envsubst
+
+osmo_token_api_is_unsupported() {
+  local output="${1:-}"
+  osmo_api_is_unsupported "$output" || [[ "$output" == *"status code 422"* && "$output" == *'"loc":["query","access_token"]'* ]]
+}
 
 run_preflight_checks() {
   section "Preflight Version Checks"
@@ -215,6 +221,17 @@ mkdir -p "$CONFIG_DIR/out"
 section "OSMO Login"
 osmo_login_and_setup "$service_url"
 
+token_api_probe_output=""
+if ! token_api_probe_output=$(osmo token list 2>&1); then
+  if osmo_token_api_is_unsupported "$token_api_probe_output"; then
+    use_dev_backend_login=true
+    warn "OSMO service does not support the token API; backend operator will use dev login compatibility mode"
+  else
+    error "$token_api_probe_output"
+    exit 1
+  fi
+fi
+
 #------------------------------------------------------------------------------
 # Prepare Namespaces and Service Token
 #------------------------------------------------------------------------------
@@ -228,14 +245,23 @@ kubectl get secret "$account_secret" -n "$NS_OSMO_OPERATOR" &>/dev/null && token
 
 if [[ "$regenerate_token" == "true" || "$token_exists" == "false" ]]; then
   token_name="backend-token-$(date -u +%Y%m%d%H%M%S)"
+  token_output=""
   info "Generating OSMO service token $token_name..."
 
-  token_json=$(osmo token set "$token_name" \
+  if token_output=$(osmo token set "$token_name" \
     --expires-at "$expiry_date" \
     --description "Backend Operator Token" \
-    --roles osmo-backend -t json)
+    --roles osmo-backend -t json 2>&1); then
+    OSMO_SERVICE_TOKEN=$(echo "$token_output" | jq -r '.token // empty')
+  elif osmo_token_api_is_unsupported "$token_output"; then
+    warn "OSMO service does not support the token API; reusing current CLI login token for backend operator authentication"
+    OSMO_SERVICE_TOKEN=$(read_osmo_login_token)
+    use_dev_backend_login=true
+  else
+    error "$token_output"
+    exit 1
+  fi
 
-  OSMO_SERVICE_TOKEN=$(echo "$token_json" | jq -r '.token // empty')
   [[ -z "$OSMO_SERVICE_TOKEN" ]] && fatal "Failed to obtain service token"
   export OSMO_SERVICE_TOKEN
 
@@ -246,6 +272,77 @@ if [[ "$regenerate_token" == "true" || "$token_exists" == "false" ]]; then
 else
   info "Token secret $account_secret already exists"
 fi
+
+patch_backend_operator_for_dev_login() {
+  local deployment_name="${1:?deployment name required}"
+  local container_name="${2:?container name required}"
+  local patched_args=""
+
+  patched_args=$(kubectl get deployment "$deployment_name" -n "$NS_OSMO_OPERATOR" -o json | \
+    jq -c '.spec.template.spec.containers[] | select(.name == '"\"$container_name\""') | .args | if index("--method") then . else . + ["--method", "dev", "--username", "guest"] end')
+
+  [[ -n "$patched_args" ]] || fatal "Could not determine args for deployment $deployment_name"
+
+  kubectl patch deployment "$deployment_name" -n "$NS_OSMO_OPERATOR" --type=strategic \
+    -p "{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"$container_name\",\"args\":$patched_args}]}}}}" >/dev/null
+}
+
+create_backend_dev_kubeconfig_secret() {
+  local service_account_name="${1:?service account name required}"
+  local secret_name="${2:?secret name required}"
+  local service_account_token=""
+  local cluster_ca=""
+  local kubeconfig_file=""
+
+  service_account_token=$(kubectl create token "$service_account_name" -n "$NS_OSMO_OPERATOR")
+  [[ -n "$service_account_token" ]] || fatal "Failed to create token for service account $service_account_name"
+
+  cluster_ca=$(kubectl get configmap kube-root-ca.crt -n "$NS_OSMO_OPERATOR" -o jsonpath='{.data.ca\.crt}' | base64 -w0)
+  [[ -n "$cluster_ca" ]] || fatal "Failed to read cluster CA bundle from kube-root-ca.crt"
+
+  kubeconfig_file=$(mktemp)
+  cat > "$kubeconfig_file" <<EOF
+apiVersion: v1
+kind: Config
+clusters:
+  - name: in-cluster
+    cluster:
+      certificate-authority-data: ${cluster_ca}
+      server: https://kubernetes.default.svc
+contexts:
+  - name: in-cluster
+    context:
+      cluster: in-cluster
+      namespace: ${NS_OSMO_OPERATOR}
+      user: ${service_account_name}
+current-context: in-cluster
+users:
+  - name: ${service_account_name}
+    user:
+      token: ${service_account_token}
+EOF
+
+  kubectl create secret generic "$secret_name" \
+    --namespace="$NS_OSMO_OPERATOR" \
+    --from-file=config="$kubeconfig_file" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
+  rm -f "$kubeconfig_file"
+}
+
+patch_backend_operator_for_dev_kubeconfig() {
+  local deployment_name="${1:?deployment name required}"
+  local container_name="${2:?container name required}"
+  local secret_name="${3:?secret name required}"
+  local kubeconfig_dir="/tmp/osmo-kubeconfig"
+  local kubeconfig_path="${kubeconfig_dir}/config"
+
+  kubectl patch deployment "$deployment_name" -n "$NS_OSMO_OPERATOR" --type=strategic \
+    -p "{\"spec\":{\"template\":{\"spec\":{\"volumes\":[{\"name\":\"dev-kubeconfig\",\"secret\":{\"secretName\":\"$secret_name\"}}],\"containers\":[{\"name\":\"$container_name\",\"volumeMounts\":[{\"name\":\"dev-kubeconfig\",\"mountPath\":\"$kubeconfig_dir\",\"readOnly\":true}]}]}}}}" >/dev/null
+
+  kubectl set env deployment/"$deployment_name" -n "$NS_OSMO_OPERATOR" \
+    HOME=/tmp KUBECONFIG="$kubeconfig_path" >/dev/null
+}
 
 #------------------------------------------------------------------------------
 # Configure Storage Container
@@ -312,10 +409,33 @@ if [[ "$use_access_keys" == "false" ]]; then
   helm_args+=(-f "$identity_values" --set "serviceAccount.annotations.azure\.workload\.identity/client-id=$osmo_identity_client_id")
 fi
 
+if [[ "$use_dev_backend_login" == "true" ]]; then
+  warn "Deploying backend operator with dev-login compatibility for an OSMO service that lacks the token API"
+fi
+
+helm_wait_args=(--wait --timeout "$TIMEOUT_DEPLOY")
+[[ "$use_dev_backend_login" == "true" ]] && helm_wait_args=()
+
 if [[ "$use_acr" == "true" ]]; then
-  helm upgrade -i osmo-operator "oci://${acr_login_server}/helm/backend-operator" "${helm_args[@]}" --wait --timeout "$TIMEOUT_DEPLOY"
+  [[ "$use_dev_backend_login" == "true" ]] && kubectl delete deployment -n "$NS_OSMO_OPERATOR" osmo-operator-osmo-backend-listener osmo-operator-osmo-backend-worker --ignore-not-found >/dev/null
+  helm upgrade -i osmo-operator "oci://${acr_login_server}/helm/backend-operator" "${helm_args[@]}" "${helm_wait_args[@]}"
 else
-  helm upgrade -i osmo-operator osmo/backend-operator "${helm_args[@]}" --wait --timeout "$TIMEOUT_DEPLOY"
+  [[ "$use_dev_backend_login" == "true" ]] && kubectl delete deployment -n "$NS_OSMO_OPERATOR" osmo-operator-osmo-backend-listener osmo-operator-osmo-backend-worker --ignore-not-found >/dev/null
+  helm upgrade -i osmo-operator osmo/backend-operator "${helm_args[@]}" "${helm_wait_args[@]}"
+fi
+
+if [[ "$use_dev_backend_login" == "true" ]]; then
+  info "Patching backend operator deployments to use OSMO dev login..."
+  create_backend_dev_kubeconfig_secret "osmo-operator-backend-listener" "osmo-operator-backend-listener-kubeconfig"
+  create_backend_dev_kubeconfig_secret "osmo-operator-backend-worker" "osmo-operator-backend-worker-kubeconfig"
+  patch_backend_operator_for_dev_login "osmo-operator-osmo-backend-listener" "backend-listener"
+  patch_backend_operator_for_dev_login "osmo-operator-osmo-backend-worker" "backend-worker"
+  patch_backend_operator_for_dev_kubeconfig "osmo-operator-osmo-backend-listener" "backend-listener" "osmo-operator-backend-listener-kubeconfig"
+  patch_backend_operator_for_dev_kubeconfig "osmo-operator-osmo-backend-worker" "backend-worker" "osmo-operator-backend-worker-kubeconfig"
+  kubectl delete pod -n "$NS_OSMO_OPERATOR" -l app=osmo-operator-osmo-backend-listener --ignore-not-found >/dev/null
+  kubectl delete pod -n "$NS_OSMO_OPERATOR" -l app=osmo-operator-osmo-backend-worker --ignore-not-found >/dev/null
+  kubectl rollout status deployment/osmo-operator-osmo-backend-listener -n "$NS_OSMO_OPERATOR" --timeout="$TIMEOUT_DEPLOY"
+  kubectl rollout status deployment/osmo-operator-osmo-backend-worker -n "$NS_OSMO_OPERATOR" --timeout="$TIMEOUT_DEPLOY"
 fi
 
 #------------------------------------------------------------------------------
