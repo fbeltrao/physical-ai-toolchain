@@ -58,8 +58,9 @@ done
 require_tools az terraform kubectl helm jq
 
 resolve_latest_gpu_operator_version() {
-  helm repo add nvidia "$HELM_REPO_GPU_OPERATOR" 2>/dev/null || true
-  helm repo update >/dev/null
+  # Suppress repo status output so command substitution returns only the chart version.
+  helm repo add nvidia "$HELM_REPO_GPU_OPERATOR" >/dev/null 2>&1 || true
+  helm repo update >/dev/null 2>&1
 
   latest_chart_version=$(helm search repo nvidia/gpu-operator --versions -o json | jq -r '.[0].version // empty')
   [[ -n "$latest_chart_version" ]] || fatal "Unable to determine latest GPU Operator chart version"
