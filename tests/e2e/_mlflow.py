@@ -158,11 +158,6 @@ def assert_osmo_workflow_has_mlflow_tracking(workflow: OSMOWorkflow, aml_workspa
         experiment_name=workflow.experiment_name,
     )
 
-    if tracking.tags.get("training_orchestrator") != "osmo":
-        raise AssertionError(
-            f"MLflow run {run_id!r} was missing the OSMO orchestrator tag; tags were {sorted(tracking.tags)}"
-        )
-
     if tracking.tags.get("correlation_id") != workflow.correlation_id:
         raise AssertionError(
             f"MLflow run {run_id!r} had correlation_id={tracking.tags.get('correlation_id')!r}, "
@@ -170,9 +165,7 @@ def assert_osmo_workflow_has_mlflow_tracking(workflow: OSMOWorkflow, aml_workspa
         )
 
     rendered_tags = ", ".join(
-        f"{name}={value}"
-        for name, value in sorted(tracking.tags.items())
-        if name in {"correlation_id", "training_orchestrator"}
+        f"{name}={value}" for name, value in sorted(tracking.tags.items()) if name == "correlation_id"
     )
     rendered_metrics = ", ".join(f"{name}={value}" for name, value in tracking.metrics.items())
     rendered_params = ", ".join(f"{name}={value}" for name, value in tracking.params.items())

@@ -622,9 +622,6 @@ def main(
             "azureml_workspace": azure_context.workspace_name,
         }
 
-        if training_orchestrator := os.environ.get("TRAINING_ORCHESTRATOR", "").strip():
-            tags["training_orchestrator"] = training_orchestrator
-
         if correlation_id := os.environ.get("MLFLOW_CORRELATION_ID", "").strip():
             tags["correlation_id"] = correlation_id
 
