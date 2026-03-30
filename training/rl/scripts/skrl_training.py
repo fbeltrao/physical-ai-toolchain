@@ -656,6 +656,10 @@ def mlflow_run_context(
         tags["azureml_workspace"] = context.workspace_name
     if args.checkpoint_uri:
         tags["checkpoint_source_uri"] = args.checkpoint_uri
+    if training_orchestrator := os.environ.get("TRAINING_ORCHESTRATOR", "").strip():
+        tags["training_orchestrator"] = training_orchestrator
+    if correlation_id := os.environ.get("MLFLOW_CORRELATION_ID", "").strip():
+        tags["correlation_id"] = correlation_id
     mlflow.set_tags(tags)
 
     state = MLflowRunState(

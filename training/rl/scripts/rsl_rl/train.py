@@ -621,6 +621,13 @@ def main(
             "log_dir": log_dir,
             "azureml_workspace": azure_context.workspace_name,
         }
+
+        if training_orchestrator := os.environ.get("TRAINING_ORCHESTRATOR", "").strip():
+            tags["training_orchestrator"] = training_orchestrator
+
+        if correlation_id := os.environ.get("MLFLOW_CORRELATION_ID", "").strip():
+            tags["correlation_id"] = correlation_id
+
         if azure_context.storage:
             tags["storage_container"] = azure_context.storage.container_name
 

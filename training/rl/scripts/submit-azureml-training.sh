@@ -219,9 +219,9 @@ if [[ "$skip_register" == "false" && -z "$register_checkpoint" ]]; then
   info "Auto-derived model name: $register_checkpoint"
 fi
 
-code_path="$REPO_ROOT"
-[[ -d "$code_path/training" ]] || fatal "Training source not found: $code_path/training"
-[[ -f "$code_path/training/.amlignore" ]] || warn "No .amlignore found; __pycache__ may be included in snapshot"
+code_path="$REPO_ROOT/training"
+[[ -d "$code_path/rl" ]] || fatal "RL training source not found: $code_path/rl"
+[[ -f "$code_path/.amlignore" ]] || warn "No training/.amlignore found; the AML snapshot may include unrelated files"
 
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
@@ -251,7 +251,7 @@ fi
 register_environment "$environment_name" "$environment_version" "$image" \
   "$resource_group" "$workspace_name"
 
-info "Code path: $code_path"
+info "Code path: $code_path (training/ contents only)"
 info "Environment: ${environment_name}:${environment_version}"
 
 if [[ "$assets_only" == "true" ]]; then
@@ -315,7 +315,7 @@ fi
 
 [[ "$headless" == "true" ]] && cmd="$cmd --headless"
 
-az_args+=(--set "command=bash training/scripts/train.sh $cmd")
+az_args+=(--set "command=if [ ! -e training ]; then ln -s . training; fi && bash training/rl/scripts/train.sh $cmd")
 
 # Input values
 az_args+=(
