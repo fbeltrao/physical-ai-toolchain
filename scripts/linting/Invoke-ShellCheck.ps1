@@ -96,7 +96,10 @@ function Invoke-ShellCheckCore {
 
     # Capture version (join array to string so -match populates $Matches under StrictMode)
     $scVersionOutput = (& shellcheck --version 2>$null) -join "`n"
-    $scVersion = if ($scVersionOutput -match 'version:\s*([\d.]+)') { $Matches[1] } else { 'unknown' }
+    $scVersion = 'unknown'
+    if ($scVersionOutput -match 'version:\s*([\d.]+)') {
+        $scVersion = $Matches[1]
+    }
 
     # Discover .sh files, excluding directories that should not be linted
     $excludeDirs = @('.venv', 'external', 'node_modules', '.git', 'docs/docusaurus')
@@ -145,7 +148,7 @@ function Invoke-ShellCheckCore {
                 $level = switch ($issue.level) {
                     'error'   { 'Error' }
                     'warning' { 'Warning' }
-                    default   { $issue.level }
+                    default   { 'Notice' }
                 }
 
                 if ($level -eq 'Error') { $errorCount++ }
