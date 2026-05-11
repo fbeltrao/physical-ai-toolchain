@@ -307,6 +307,7 @@ variable "should_enable_aml_diagnostic_logs" {
 variable "aml_managed_network_isolation_mode" {
   type        = string
   description = "AzureML workspace managed network isolation mode. This governs the AzureML workspace managed network only"
+  default     = "AllowOnlyApprovedOutbound"
 
   validation {
     condition     = contains(["Disabled", "AllowInternetOutbound", "AllowOnlyApprovedOutbound"], var.aml_managed_network_isolation_mode)
