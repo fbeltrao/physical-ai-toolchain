@@ -1,18 +1,10 @@
 // Platform module conditional resource tests
 // Validates should_* boolean variables control resource creation correctly
 
-mock_provider "azurerm" {
-  override_during = plan
-}
-mock_provider "azuread" {
-  override_during = plan
-}
-mock_provider "azapi" {
-  override_during = plan
-}
-mock_provider "random" {
-  override_during = plan
-}
+mock_provider "azurerm" {}
+mock_provider "azuread" {}
+mock_provider "azapi" {}
+mock_provider "random" {}
 
 override_data {
   target = data.azurerm_client_config.current
