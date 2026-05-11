@@ -94,18 +94,18 @@ Root Module (001-iac/)
 | `should_deploy_monitor_workspace` | Azure Monitor Workspace for Prometheus                   |
 | `should_deploy_ampls`             | AMPLS, scoped services, private endpoint (if PE enabled) |
 | `should_deploy_dce`               | Data Collection Endpoint, AMPLS link (if AMPLS enabled)  |
-| `should_deploy_aml_compute`       | AzureML managed GPU compute cluster                      |
+| `aml_compute_clusters`            | AzureML managed compute clusters keyed by cluster name   |
 | `should_include_aks_dns_zone`     | AKS private DNS zone in core zones                       |
 
 ### AzureML managed network isolation
 
 Use `aml_managed_network_isolation_mode` to control the AzureML workspace managed network directly.
 
-| Value                        | AzureML workspace behavior                                           |
+| Value                       | AzureML workspace behavior                                           |
 |-----------------------------|----------------------------------------------------------------------|
 | `Disabled`                  | AzureML managed network is off, and AML compute can use a subnet ID  |
-| `AllowInternetOutbound`     | AzureML managed network is on with Microsoft-managed outbound access  |
-| `AllowOnlyApprovedOutbound` | AzureML managed network is on and outbound access is restricted       |
+| `AllowInternetOutbound`     | AzureML managed network is on with Microsoft-managed outbound access |
+| `AllowOnlyApprovedOutbound` | AzureML managed network is on and outbound access is restricted      |
 
 Treat changes to `aml_managed_network_isolation_mode` as AzureML redeploy operations. AzureML does not support disabling managed network isolation after it is enabled, or switching between `AllowInternetOutbound` and `AllowOnlyApprovedOutbound` in place. Delete and recreate managed compute resources when enabling managed networking on an existing workspace; recreate the workspace for unsupported mode transitions.
 
@@ -135,8 +135,8 @@ terraform output key_vault_name
 # DNS server IP (for VPN clients)
 terraform output dns_server_ip
 
-# AzureML compute cluster (when enabled)
-terraform output aml_compute_cluster
+# AzureML compute clusters keyed by cluster name
+terraform output -json aml_compute_clusters | jq -r '."gpu-training".name'
 ```
 
 ## 🔧 Optional Components
