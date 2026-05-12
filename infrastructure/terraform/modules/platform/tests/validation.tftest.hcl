@@ -360,3 +360,49 @@ run "aml_compute_invalid_identity_type_rejected" {
 
   expect_failures = [var.aml_compute_clusters]
 }
+
+run "aml_compute_invalid_scale_down_after_idle_rejected" {
+  command = plan
+
+  variables {
+    resource_prefix  = run.setup.resource_prefix
+    environment      = run.setup.environment
+    instance         = run.setup.instance
+    location         = run.setup.location
+    resource_group   = run.setup.resource_group
+    current_user_oid = run.setup.current_user_oid
+    aml_compute_clusters = {
+      gpu-cluster = {
+        vm_size               = "Standard_NC4as_T4_v3"
+        vm_priority           = "LowPriority"
+        min_node_count        = 0
+        max_node_count        = 1
+        scale_down_after_idle = "5 minutes"
+      }
+    }
+  }
+
+  expect_failures = [var.aml_compute_clusters]
+}
+
+run "aml_compute_compound_scale_down_after_idle_accepted" {
+  command = plan
+
+  variables {
+    resource_prefix  = run.setup.resource_prefix
+    environment      = run.setup.environment
+    instance         = run.setup.instance
+    location         = run.setup.location
+    resource_group   = run.setup.resource_group
+    current_user_oid = run.setup.current_user_oid
+    aml_compute_clusters = {
+      gpu-cluster = {
+        vm_size               = "Standard_NC4as_T4_v3"
+        vm_priority           = "LowPriority"
+        min_node_count        = 0
+        max_node_count        = 1
+        scale_down_after_idle = "PT1H30M"
+      }
+    }
+  }
+}

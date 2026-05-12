@@ -558,6 +558,13 @@ variable "aml_compute_clusters" {
     ])
     error_message = "aml_compute_clusters identity_type values must be either SystemAssigned or UserAssigned."
   }
+
+  validation {
+    condition = alltrue([
+      for _, cluster in var.aml_compute_clusters : can(regex("^PT([0-9]+H([0-9]+M)?([0-9]+S)?|[0-9]+M([0-9]+S)?|[0-9]+S)$", cluster.scale_down_after_idle))
+    ])
+    error_message = "aml_compute_clusters scale_down_after_idle must be an ISO 8601 time duration, such as PT30S, PT5M, PT1H, or PT1H30M."
+  }
 }
 
 /*

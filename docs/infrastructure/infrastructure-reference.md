@@ -109,6 +109,42 @@ Use `aml_managed_network_isolation_mode` to control the AzureML workspace manage
 
 Treat changes to `aml_managed_network_isolation_mode` as AzureML redeploy operations. AzureML does not support disabling managed network isolation after it is enabled, or switching between `AllowInternetOutbound` and `AllowOnlyApprovedOutbound` in place. Delete and recreate managed compute resources when enabling managed networking on an existing workspace; recreate the workspace for unsupported mode transitions.
 
+### AzureML compute cluster migration
+
+> [!WARNING]
+> Existing deployments that used the previous singular AzureML compute cluster resource require a one-time Terraform state migration. Without this migration, Terraform plans to destroy the existing cluster and create a replacement at the new keyed address.
+
+Replace the previous `should_deploy_aml_compute` and `aml_compute_config` settings with the `aml_compute_clusters` map in `terraform.tfvars`:
+
+```hcl
+aml_compute_clusters = {
+  "gpu-cluster" = {
+    vm_size               = "Standard_NC4as_T4_v3"
+    vm_priority           = "LowPriority"
+    min_node_count        = 0
+    max_node_count        = 1
+    scale_down_after_idle = "PT5M"
+    identity_type         = "SystemAssigned"
+  }
+}
+```
+
+Set `identity_type = "SystemAssigned"` when preserving the previous compute-cluster identity behavior. Omit `identity_type` to use the new default, `UserAssigned`, with the platform managed identity.
+
+Move existing Terraform state from the former `count` address to the new cluster-name key before applying:
+
+```bash
+terraform state mv \
+  'module.platform.azurerm_machine_learning_compute_cluster.gpu[0]' \
+  'module.platform.azurerm_machine_learning_compute_cluster.gpu["gpu-cluster"]'
+```
+
+Update output consumers to read the cluster entry from the new map output:
+
+```bash
+terraform output -json aml_compute_clusters | jq '."gpu-cluster"'
+```
+
 ## 📦 Modules
 
 | Module                                                                                                             | Purpose                                                         |
