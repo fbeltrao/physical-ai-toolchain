@@ -172,7 +172,7 @@ terraform output key_vault_name
 terraform output dns_server_ip
 
 # AzureML compute clusters keyed by cluster name
-terraform output -json aml_compute_clusters | jq -r '."gpu-training".name'
+terraform output -json aml_compute_clusters | jq -r '."gpu-cluster".name'
 ```
 
 ## 🔧 Optional Components
