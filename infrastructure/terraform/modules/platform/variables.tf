@@ -330,7 +330,7 @@ variable "aml_compute_clusters" {
   }))
   description = "AzureML managed compute clusters keyed by Azure ML compute cluster name. Empty map deploys no clusters."
   default     = {}
-
+      for cluster_name, _ in var.aml_compute_clusters : can(regex("^[A-Za-z0-9][A-Za-z0-9-]{1,22}[A-Za-z0-9]$", cluster_name))
   validation {
     condition = alltrue([
       for cluster_name, _ in var.aml_compute_clusters : can(regex("^[A-Za-z0-9][A-Za-z0-9-]{0,22}[A-Za-z0-9]$", cluster_name))
