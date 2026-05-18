@@ -332,7 +332,7 @@ variable "aml_compute_clusters" {
   default     = {}
       for cluster_name, _ in var.aml_compute_clusters : can(regex("^[A-Za-z0-9][A-Za-z0-9-]{1,22}[A-Za-z0-9]$", cluster_name))
   validation {
-    condition = alltrue([
+    error_message = "aml_compute_clusters keys must be 3-24 characters, start and end with an alphanumeric character, and contain only letters, numbers, and hyphens."
       for cluster_name, _ in var.aml_compute_clusters : can(regex("^[A-Za-z0-9][A-Za-z0-9-]{0,22}[A-Za-z0-9]$", cluster_name))
     ])
     error_message = "aml_compute_clusters keys must be 2-24 characters, start and end with an alphanumeric character, and contain only letters, numbers, and hyphens."
